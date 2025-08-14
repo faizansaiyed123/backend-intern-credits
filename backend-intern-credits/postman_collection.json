@@ -1,0 +1,183 @@
+{
+  "info": {
+    "name": "backend-intern-credits",
+    "_postman_id": "00000000-0000-0000-0000-000000000001",
+    "description": "Postman collection for LawVriksh Credits API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/healthz",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "healthz"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Credits",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/credits/1",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "credits",
+            "1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Add Credits",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 10}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/credits/1/add",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "credits",
+            "1",
+            "add"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Deduct Credits",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 3}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/credits/1/deduct",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "credits",
+            "1",
+            "deduct"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Reset Credits",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/credits/1/reset",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "credits",
+            "1",
+            "reset"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Migrations",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{admin_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/schema/migrations",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "schema",
+            "migrations"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Apply Schema",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{admin_api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"migration_name\": \"add_idx_updated\", \"sql\": \"CREATE INDEX IF NOT EXISTS idx_credits_updated ON credits(last_updated DESC);\"}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/schema/apply",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "schema",
+            "apply"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "admin_api_key",
+      "value": "change-me"
+    }
+  ]
+}
