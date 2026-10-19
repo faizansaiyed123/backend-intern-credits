@@ -177,7 +177,8 @@
     },
     {
       "key": "admin_api_key",
-      "value": "change-me"
+      "value": "",
+      "description": "Set to the ADMIN_API_KEY configured on the backend."
     }
   ]
 }
