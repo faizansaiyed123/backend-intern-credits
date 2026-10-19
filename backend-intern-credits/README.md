@@ -15,6 +15,9 @@ cp .env.example .env
 # Edit .env and replace the database credentials and admin key.
 set -a && source .env && set +a
 psql "${DATABASE_URL/+psycopg/}" -f schema.sql
+# Optional demo account so the frontend has an existing user to open:
+psql "${DATABASE_URL/+psycopg/}" -c "INSERT INTO users (email, name) VALUES ('demo@example.com', 'Demo User') ON CONFLICT (email) DO NOTHING;"
+psql "${DATABASE_URL/+psycopg/}" -c "SELECT user_id, email, name FROM users WHERE email = 'demo@example.com';"
 uvicorn src.main:app --reload
 ```
 
