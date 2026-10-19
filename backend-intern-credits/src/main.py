@@ -8,12 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from db import run_sql, engine
+try:
+    from .db import run_sql, engine
+except ImportError:  # Supports running from the src directory as well.
+    from db import run_sql, engine
 
 app = FastAPI(title="LawVriksh Credits API", version="1.0.0")
 
-# Configure explicit frontend origins for local development and production.
-# Example: CORS_ORIGINS=https://credits.example.com,http://localhost:5173
 allowed_origins = [
     origin.strip().rstrip("/")
     for origin in os.getenv(
@@ -60,7 +61,6 @@ def get_credits(user_id: int):
         {"uid": user_id},
     ).mappings().first()
     if not row:
-        # Initialize with zero credits lazily.
         ensure_credit_row(user_id)
         row = {"credits": 0, "last_updated": datetime.now(timezone.utc)}
     return {
@@ -85,7 +85,6 @@ def add_credits(user_id: int, body: Amount):
 def deduct_credits(user_id: int, body: Amount):
     get_user(user_id)
     ensure_credit_row(user_id)
-    # Prevent negative balances.
     updated = run_sql(
         "UPDATE credits SET credits = credits - :amt, last_updated = NOW() WHERE user_id = :uid AND credits >= :amt",
         {"uid": user_id, "amt": body.amount},
@@ -106,22 +105,15 @@ def reset_credits(user_id: int):
     return get_credits(user_id)
 
 
-# --- External schema update API ---
-
-
 class SchemaApply(BaseModel):
     migration_name: str = Field(min_length=1, max_length=200)
     sql: str = Field(min_length=1)
 
 
 def admin_guard(x_api_key: Optional[str] = Header(None)):
-    # Fail closed: never use a predictable default key when configuration is absent.
     configured_key = os.getenv("ADMIN_API_KEY")
     if not configured_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin API is not configured on this server",
-        )
+        raise HTTPException(status_code=503, detail="Admin API is not configured on this server")
     if x_api_key is None or not hmac.compare_digest(x_api_key, configured_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
@@ -137,7 +129,6 @@ def list_migrations(_: bool = Depends(admin_guard)):
 
 @app.post("/api/schema/apply")
 def apply_schema(payload: SchemaApply, _: bool = Depends(admin_guard)):
-    # Idempotent: skip if this migration name has already been applied.
     exists = run_sql(
         "SELECT 1 FROM schema_migrations WHERE migration_name=:n",
         {"n": payload.migration_name},
@@ -148,13 +139,10 @@ def apply_schema(payload: SchemaApply, _: bool = Depends(admin_guard)):
             "reason": "already_applied",
             "migration_name": payload.migration_name,
         }
-    # Apply the SQL and record it atomically.
     with engine.begin() as conn:
         conn.execute(text(payload.sql))
         conn.execute(
-            text(
-                "INSERT INTO schema_migrations (migration_name, sql_text) VALUES (:n, :s)"
-            ),
+            text("INSERT INTO schema_migrations (migration_name, sql_text) VALUES (:n, :s)"),
             {"n": payload.migration_name, "s": payload.sql},
         )
     return {"status": "applied", "migration_name": payload.migration_name}
