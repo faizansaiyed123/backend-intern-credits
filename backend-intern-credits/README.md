@@ -4,15 +4,21 @@ LawVriksh Backend Intern Assignment 2 - Credit Management API & Schema
 
 ## Quick Start
 
+Run these commands from the repository root:
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+cd backend-intern-credits
+python -m venv .venv
+source .venv/bin/activate
 pip install -r src/requirements.txt
-# Create .env using .env.example and set DATABASE_URL + a strong ADMIN_API_KEY.
+cp .env.example .env
+# Edit .env and replace the database credentials and admin key.
+set -a && source .env && set +a
 psql "$DATABASE_URL" -f schema.sql
 uvicorn src.main:app --reload
 ```
 
-To run with the daily scheduler inside the same process:
+To run with the daily scheduler inside the same process, start the app from the same directory:
 ```bash
 uvicorn src.app_with_scheduler:app --reload
 ```
@@ -44,4 +50,4 @@ The API allows the local Vite origins by default. For a deployed frontend, set `
 CORS_ORIGINS=http://localhost:5173,https://your-frontend.example.com
 ```
 
-Restart the API after changing environment variables. The admin endpoints now fail closed if `ADMIN_API_KEY` is missing; configure a strong key on the backend before using migration management.
+Restart the API after changing environment variables. The admin endpoints fail closed if `ADMIN_API_KEY` is missing; configure a strong key on the backend before using migration management.
