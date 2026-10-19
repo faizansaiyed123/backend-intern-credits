@@ -14,7 +14,7 @@ pip install -r src/requirements.txt
 cp .env.example .env
 # Edit .env and replace the database credentials and admin key.
 set -a && source .env && set +a
-psql "$DATABASE_URL" -f schema.sql
+psql "${DATABASE_URL/+psycopg/}" -f schema.sql
 uvicorn src.main:app --reload
 ```
 
@@ -23,7 +23,7 @@ To run with the daily scheduler inside the same process, start the app from the 
 uvicorn src.app_with_scheduler:app --reload
 ```
 
-Alternatively, schedule the daily job externally via cron:
+Alternatively, schedule the daily job externally via cron. Configure the needed database connection environment variables in the cron environment; shell `.env` files are not loaded automatically:
 ```
 0 0 * * * curl -s http://localhost:8000/healthz >/dev/null 2>&1 && psql "$DATABASE_URL" -c "INSERT INTO credits (user_id) SELECT user_id FROM users u WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.user_id=u.user_id)"; psql "$DATABASE_URL" -c "UPDATE credits SET credits = credits + 5, last_updated = NOW();"
 ```
