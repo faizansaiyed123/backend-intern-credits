@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 try:
     from .db import run_sql, engine
-except ImportError:  
+except ImportError:
     from db import run_sql, engine
 
 app = FastAPI(title="LawVriksh Credits API", version="1.0.0")

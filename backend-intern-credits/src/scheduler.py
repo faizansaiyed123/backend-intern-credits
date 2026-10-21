@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 try:
     from .db import run_sql
-except ImportError:  
+except ImportError:
     from db import run_sql
 
 scheduler = BackgroundScheduler(timezone="UTC")
