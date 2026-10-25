@@ -305,7 +305,7 @@ def deduct_credits(
     user_id: int,
     body: Amount,
     current_user=Depends(get_current_user),
-    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    _: bool = Depends(admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
@@ -324,7 +324,7 @@ def deduct_credits(
 def reset_credits(
     user_id: int,
     current_user=Depends(get_current_user),
-    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    _: bool = Depends(admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
