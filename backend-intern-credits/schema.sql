@@ -5,8 +5,26 @@ CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
+    password_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Safe, repeatable upgrade for databases created before authentication was added.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- Opaque bearer sessions are stored only as SHA-256 hashes and can be revoked on logout.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    session_id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    token_hash CHAR(64) UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_expiry
+    ON auth_sessions(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry
+    ON auth_sessions(expires_at);
 
 -- Each user has exactly one credit row
 CREATE TABLE IF NOT EXISTS credits (
