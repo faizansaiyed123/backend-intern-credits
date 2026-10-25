@@ -36,6 +36,12 @@ def add_daily_credits() -> bool:
         connection.execute(
             text("UPDATE credits SET credits = credits + 5, last_updated = NOW()")
         )
+        connection.execute(
+            text(
+                "DELETE FROM auth_login_attempts "
+                "WHERE window_started_at < NOW() - INTERVAL '1 day'"
+            )
+        )
 
     print(f"[{datetime.now(timezone.utc)}] Daily credits added for {run_date}.")
     return True
