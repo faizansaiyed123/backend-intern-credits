@@ -7,7 +7,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -84,16 +84,17 @@ def normalize_email(email: str) -> str:
 
 
 LOGIN_MAX_ATTEMPTS = 10
-LOGIN_WINDOW_SQL = "INTERVAL '15 minutes'"
-LOGIN_BLOCK_SQL = "INTERVAL '15 minutes'"
 
 
-def email_fingerprint(email: str) -> str:
-    return hashlib.sha256(email.encode("utf-8")).hexdigest()
+def login_fingerprint(email: str, client_host: str) -> str:
+    # Include the direct client address so one network cannot lock out an account
+    # for everyone else. Store only the one-way fingerprint, never the raw email/IP.
+    material = email + "\0" + client_host
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def check_login_allowed(email: str) -> None:
-    fingerprint = email_fingerprint(email)
+def check_login_allowed(email: str, client_host: str) -> None:
+    fingerprint = login_fingerprint(email, client_host)
     row = run_sql(
         """
         INSERT INTO auth_login_attempts (email_hash, attempts, window_started_at, blocked_until)
@@ -106,8 +107,9 @@ def check_login_allowed(email: str) -> None:
                 WHEN auth_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
                 THEN NOW() ELSE auth_login_attempts.window_started_at END,
             blocked_until = CASE
-                WHEN auth_login_attempts.blocked_until IS NOT NULL
-                     AND auth_login_attempts.blocked_until <= NOW()
+                WHEN auth_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
+                     OR (auth_login_attempts.blocked_until IS NOT NULL
+                         AND auth_login_attempts.blocked_until <= NOW())
                 THEN NULL ELSE auth_login_attempts.blocked_until END
         RETURNING (blocked_until IS NOT NULL AND blocked_until > NOW()) AS blocked
         """,
@@ -121,7 +123,7 @@ def check_login_allowed(email: str) -> None:
         )
 
 
-def record_failed_login(email: str) -> None:
+def record_failed_login(email: str, client_host: str) -> None:
     run_sql(
         """
         UPDATE auth_login_attempts
@@ -139,18 +141,21 @@ def record_failed_login(email: str) -> None:
                 THEN NOW() ELSE window_started_at END
         WHERE email_hash = :email_hash
         """,
-        {"email_hash": email_fingerprint(email), "max_attempts": LOGIN_MAX_ATTEMPTS},
+        {
+            "email_hash": login_fingerprint(email, client_host),
+            "max_attempts": LOGIN_MAX_ATTEMPTS,
+        },
     )
 
 
-def clear_login_failures(email: str) -> None:
+def clear_login_failures(email: str, client_host: str) -> None:
     run_sql(
         """
         UPDATE auth_login_attempts
         SET attempts = 0, window_started_at = NOW(), blocked_until = NULL
         WHERE email_hash = :email_hash
         """,
-        {"email_hash": email_fingerprint(email)},
+        {"email_hash": login_fingerprint(email, client_host)},
     )
 
 
@@ -310,9 +315,10 @@ def register(payload: RegisterInput):
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginInput):
+def login(payload: LoginInput, request: Request):
     email = normalize_email(payload.email)
-    check_login_allowed(email)
+    client_host = request.client.host if request.client else "unknown"
+    check_login_allowed(email, client_host)
     row = run_sql(
         "SELECT user_id, email, name, password_hash FROM users WHERE email=:email",
         {"email": email},
@@ -323,9 +329,9 @@ def login(payload: LoginInput):
         dummy = "pbkdf2_sha256$310000$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         verify_password(payload.password, dummy)
     if not valid_password:
-        record_failed_login(email)
+        record_failed_login(email, client_host)
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    clear_login_failures(email)
+    clear_login_failures(email, client_host)
     with engine.begin() as connection:
         token, expires_at = issue_session(connection, int(row["user_id"]))
     return {
