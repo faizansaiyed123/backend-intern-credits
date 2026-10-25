@@ -98,22 +98,29 @@ def check_login_allowed(email: str, client_host: str) -> None:
     row = run_sql(
         """
         INSERT INTO auth_login_attempts (email_hash, attempts, window_started_at, blocked_until)
-        VALUES (:email_hash, 0, NOW(), NULL)
+        VALUES (:email_hash, 1, NOW(), NULL)
         ON CONFLICT (email_hash) DO UPDATE SET
             attempts = CASE
                 WHEN auth_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-                THEN 0 ELSE auth_login_attempts.attempts END,
+                     OR (auth_login_attempts.blocked_until IS NOT NULL
+                         AND auth_login_attempts.blocked_until <= NOW())
+                THEN 1 ELSE auth_login_attempts.attempts + 1 END,
             window_started_at = CASE
                 WHEN auth_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
+                     OR (auth_login_attempts.blocked_until IS NOT NULL
+                         AND auth_login_attempts.blocked_until <= NOW())
                 THEN NOW() ELSE auth_login_attempts.window_started_at END,
             blocked_until = CASE
                 WHEN auth_login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
                      OR (auth_login_attempts.blocked_until IS NOT NULL
                          AND auth_login_attempts.blocked_until <= NOW())
-                THEN NULL ELSE auth_login_attempts.blocked_until END
+                THEN NULL
+                WHEN auth_login_attempts.attempts + 1 > :max_attempts
+                THEN NOW() + INTERVAL '15 minutes'
+                ELSE auth_login_attempts.blocked_until END
         RETURNING (blocked_until IS NOT NULL AND blocked_until > NOW()) AS blocked
         """,
-        {"email_hash": fingerprint},
+        {"email_hash": fingerprint, "max_attempts": LOGIN_MAX_ATTEMPTS},
     ).mappings().first()
     if row and row["blocked"]:
         raise HTTPException(
@@ -121,31 +128,6 @@ def check_login_allowed(email: str, client_host: str) -> None:
             detail="Too many sign-in attempts. Try again in 15 minutes.",
             headers={"Retry-After": "900"},
         )
-
-
-def record_failed_login(email: str, client_host: str) -> None:
-    run_sql(
-        """
-        UPDATE auth_login_attempts
-        SET attempts = CASE
-                WHEN window_started_at < NOW() - INTERVAL '15 minutes'
-                THEN 1 ELSE attempts + 1 END,
-            blocked_until = CASE
-                WHEN (CASE
-                    WHEN window_started_at < NOW() - INTERVAL '15 minutes'
-                    THEN 1 ELSE attempts + 1 END) >= :max_attempts
-                THEN NOW() + INTERVAL '15 minutes'
-                ELSE blocked_until END,
-            window_started_at = CASE
-                WHEN window_started_at < NOW() - INTERVAL '15 minutes'
-                THEN NOW() ELSE window_started_at END
-        WHERE email_hash = :email_hash
-        """,
-        {
-            "email_hash": login_fingerprint(email, client_host),
-            "max_attempts": LOGIN_MAX_ATTEMPTS,
-        },
-    )
 
 
 def clear_login_failures(email: str, client_host: str) -> None:
@@ -157,7 +139,6 @@ def clear_login_failures(email: str, client_host: str) -> None:
         """,
         {"email_hash": login_fingerprint(email, client_host)},
     )
-
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
@@ -329,7 +310,6 @@ def login(payload: LoginInput, request: Request):
         dummy = "pbkdf2_sha256$310000$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         verify_password(payload.password, dummy)
     if not valid_password:
-        record_failed_login(email, client_host)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     clear_login_failures(email, client_host)
     with engine.begin() as connection:
