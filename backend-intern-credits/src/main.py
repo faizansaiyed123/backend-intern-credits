@@ -93,7 +93,7 @@ def login_fingerprint(email: str, client_host: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def check_login_allowed(email: str, client_host: str) -> None:
+def check_login_allowed(email: str, client_host: str, attempt_type: str = "sign-in") -> None:
     fingerprint = login_fingerprint(email, client_host)
     row = run_sql(
         """
@@ -125,7 +125,7 @@ def check_login_allowed(email: str, client_host: str) -> None:
     if row and row["blocked"]:
         raise HTTPException(
             status_code=429,
-            detail="Too many sign-in attempts. Try again in 15 minutes.",
+            detail=f"Too many {attempt_type} attempts. Try again in 15 minutes.",
             headers={"Retry-After": "900"},
         )
 
@@ -260,7 +260,9 @@ def ensure_credit_row(user_id: int):
 
 
 @app.post("/api/auth/register", status_code=201)
-def register(payload: RegisterInput):
+def register(payload: RegisterInput, request: Request):
+    client_host = request.client.host if request.client else "unknown"
+    check_login_allowed("__registration__", client_host, "account registration")
     email = normalize_email(payload.email)
     name = payload.name.strip()
     if not name:
