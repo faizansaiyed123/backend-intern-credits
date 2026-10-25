@@ -148,6 +148,14 @@ def has_admin_access(candidate: Optional[str]) -> bool:
     return bool(configured_key and candidate and hmac.compare_digest(candidate, configured_key))
 
 
+def admin_guard(x_api_key: Optional[str] = Header(None)):
+    if not configured_admin_key():
+        raise HTTPException(status_code=503, detail="Admin API is not configured with a strong key")
+    if not has_admin_access(x_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
 def require_account_access(user_id: int, current_user, x_api_key: Optional[str] = None):
     # A normal account can only read itself. A trusted operator may select another account.
     if int(current_user["user_id"]) != user_id and not has_admin_access(x_api_key):
@@ -279,7 +287,7 @@ def add_credits(
     user_id: int,
     body: Amount,
     current_user=Depends(get_current_user),
-    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    _: bool = Depends(admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
@@ -344,14 +352,6 @@ def validate_migration_sql(sql_text: str) -> str:
             detail="Only non-destructive CREATE/ALTER TABLE, INDEX, or SEQUENCE statements are allowed",
         )
     return statement
-
-
-def admin_guard(x_api_key: Optional[str] = Header(None)):
-    if not configured_admin_key():
-        raise HTTPException(status_code=503, detail="Admin API is not configured with a strong key")
-    if not has_admin_access(x_api_key):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return True
 
 
 @app.get("/api/schema/migrations")
