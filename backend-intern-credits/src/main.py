@@ -68,7 +68,7 @@ class LoginInput(BaseModel):
 
 
 class Amount(BaseModel):
-    amount: int = Field(gt=0)
+    amount: int = Field(gt=0, le=2_147_483_647)
 
 
 class SchemaApply(BaseModel):
@@ -395,10 +395,13 @@ def add_credits(
     require_account_access(user_id, current_user, x_api_key)
     get_user(user_id)
     ensure_credit_row(user_id)
-    run_sql(
-        "UPDATE credits SET credits = credits + :amt, last_updated = NOW() WHERE user_id = :uid",
-        {"uid": user_id, "amt": body.amount},
-    )
+    updated = run_sql(
+        "UPDATE credits SET credits = credits + :amt, last_updated = NOW() "
+        "WHERE user_id = :uid AND credits <= :max_balance - :amt",
+        {"uid": user_id, "amt": body.amount, "max_balance": 2_147_483_647},
+    ).rowcount
+    if updated == 0:
+        raise HTTPException(status_code=400, detail="Credit balance limit exceeded")
     return get_credits(user_id, current_user, x_api_key)
 
 
