@@ -138,9 +138,20 @@ def get_current_user(authorization: Optional[str] = Header(None)):
     return row
 
 
-def require_account_owner(user_id: int, current_user):
-    # Conceal whether a different user's account ID exists.
-    if int(current_user["user_id"]) != user_id:
+def configured_admin_key() -> Optional[str]:
+    candidate = os.getenv("ADMIN_API_KEY")
+    return candidate if candidate and len(candidate) >= 32 else None
+
+
+def has_admin_access(candidate: Optional[str]) -> bool:
+    configured_key = configured_admin_key()
+    return bool(configured_key and candidate and hmac.compare_digest(candidate, configured_key))
+
+
+def require_account_access(user_id: int, current_user, x_api_key: Optional[str] = None):
+    # A normal account can only read itself. A trusted operator may select another account.
+    if int(current_user["user_id"]) != user_id and not has_admin_access(x_api_key):
+        # Conceal whether a different user's account ID exists.
         raise HTTPException(status_code=404, detail="User not found")
 
 
@@ -242,8 +253,12 @@ def logout(
 
 
 @app.get("/api/credits/{user_id}")
-def get_credits(user_id: int, current_user=Depends(get_current_user)):
-    require_account_owner(user_id, current_user)
+def get_credits(
+    user_id: int,
+    current_user=Depends(get_current_user),
+    x_api_key: Optional[str] = Header(None),
+):
+    require_account_access(user_id, current_user, x_api_key)
     get_user(user_id)
     row = run_sql(
         "SELECT credits, last_updated FROM credits WHERE user_id=:uid",
@@ -260,20 +275,32 @@ def get_credits(user_id: int, current_user=Depends(get_current_user)):
 
 
 @app.post("/api/credits/{user_id}/add")
-def add_credits(user_id: int, body: Amount, current_user=Depends(get_current_user)):
-    require_account_owner(user_id, current_user)
+def add_credits(
+    user_id: int,
+    body: Amount,
+    current_user=Depends(get_current_user),
+    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    x_api_key: Optional[str] = Header(None),
+):
+    require_account_access(user_id, current_user, x_api_key)
     get_user(user_id)
     ensure_credit_row(user_id)
     run_sql(
         "UPDATE credits SET credits = credits + :amt, last_updated = NOW() WHERE user_id = :uid",
         {"uid": user_id, "amt": body.amount},
     )
-    return get_credits(user_id, current_user)
+    return get_credits(user_id, current_user, x_api_key)
 
 
 @app.post("/api/credits/{user_id}/deduct")
-def deduct_credits(user_id: int, body: Amount, current_user=Depends(get_current_user)):
-    require_account_owner(user_id, current_user)
+def deduct_credits(
+    user_id: int,
+    body: Amount,
+    current_user=Depends(get_current_user),
+    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    x_api_key: Optional[str] = Header(None),
+):
+    require_account_access(user_id, current_user, x_api_key)
     get_user(user_id)
     ensure_credit_row(user_id)
     updated = run_sql(
@@ -282,19 +309,24 @@ def deduct_credits(user_id: int, body: Amount, current_user=Depends(get_current_
     ).rowcount
     if updated == 0:
         raise HTTPException(status_code=400, detail="Insufficient credits")
-    return get_credits(user_id, current_user)
+    return get_credits(user_id, current_user, x_api_key)
 
 
 @app.patch("/api/credits/{user_id}/reset")
-def reset_credits(user_id: int, current_user=Depends(get_current_user)):
-    require_account_owner(user_id, current_user)
+def reset_credits(
+    user_id: int,
+    current_user=Depends(get_current_user),
+    _: bool = Depends(lambda x_api_key=Header(None): admin_guard(x_api_key)),
+    x_api_key: Optional[str] = Header(None),
+):
+    require_account_access(user_id, current_user, x_api_key)
     get_user(user_id)
     ensure_credit_row(user_id)
     run_sql(
         "UPDATE credits SET credits = 0, last_updated = NOW() WHERE user_id = :uid",
         {"uid": user_id},
     )
-    return get_credits(user_id, current_user)
+    return get_credits(user_id, current_user, x_api_key)
 
 
 def validate_migration_sql(sql_text: str) -> str:
@@ -315,10 +347,9 @@ def validate_migration_sql(sql_text: str) -> str:
 
 
 def admin_guard(x_api_key: Optional[str] = Header(None)):
-    configured_key = os.getenv("ADMIN_API_KEY")
-    if not configured_key or len(configured_key) < 32:
+    if not configured_admin_key():
         raise HTTPException(status_code=503, detail="Admin API is not configured with a strong key")
-    if x_api_key is None or not hmac.compare_digest(x_api_key, configured_key):
+    if not has_admin_access(x_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
