@@ -143,22 +143,40 @@ def configured_admin_key() -> Optional[str]:
     return candidate if candidate and len(candidate) >= 32 else None
 
 
+def configured_credit_admin_key() -> Optional[str]:
+    candidate = os.getenv("CREDIT_ADMIN_API_KEY")
+    return candidate if candidate and len(candidate) >= 32 else None
+
+
 def has_admin_access(candidate: Optional[str]) -> bool:
     configured_key = configured_admin_key()
     return bool(configured_key and candidate and hmac.compare_digest(candidate, configured_key))
 
 
+def has_credit_admin_access(candidate: Optional[str]) -> bool:
+    configured_key = configured_credit_admin_key()
+    return bool(configured_key and candidate and hmac.compare_digest(candidate, configured_key))
+
+
 def admin_guard(x_api_key: Optional[str] = Header(None)):
     if not configured_admin_key():
-        raise HTTPException(status_code=503, detail="Admin API is not configured with a strong key")
+        raise HTTPException(status_code=503, detail="Schema admin API is not configured with a strong key")
     if not has_admin_access(x_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
+def credit_admin_guard(x_api_key: Optional[str] = Header(None)):
+    if not configured_credit_admin_key():
+        raise HTTPException(status_code=503, detail="Credit operator access is not configured with a strong key")
+    if not has_credit_admin_access(x_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
 
 def require_account_access(user_id: int, current_user, x_api_key: Optional[str] = None):
     # A normal account can only read itself. A trusted operator may select another account.
-    if int(current_user["user_id"]) != user_id and not has_admin_access(x_api_key):
+    if int(current_user["user_id"]) != user_id and not has_credit_admin_access(x_api_key):
         # Conceal whether a different user's account ID exists.
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -287,7 +305,7 @@ def add_credits(
     user_id: int,
     body: Amount,
     current_user=Depends(get_current_user),
-    _: bool = Depends(admin_guard),
+    _: bool = Depends(credit_admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
@@ -305,7 +323,7 @@ def deduct_credits(
     user_id: int,
     body: Amount,
     current_user=Depends(get_current_user),
-    _: bool = Depends(admin_guard),
+    _: bool = Depends(credit_admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
@@ -324,7 +342,7 @@ def deduct_credits(
 def reset_credits(
     user_id: int,
     current_user=Depends(get_current_user),
-    _: bool = Depends(admin_guard),
+    _: bool = Depends(credit_admin_guard),
     x_api_key: Optional[str] = Header(None),
 ):
     require_account_access(user_id, current_user, x_api_key)
