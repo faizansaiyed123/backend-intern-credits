@@ -1,6 +1,6 @@
 # backend-intern-credits
 
-LawVriksh Backend Intern Assignment 2 - Credit Management API & Schema
+LawVriksh Backend Intern Assignment 2 — Credit Management API & Schema.
 
 ## Quick Start
 
@@ -12,45 +12,58 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r src/requirements.txt
 cp .env.example .env
-# Edit .env and replace the database credentials and admin key.
+# Configure DATABASE_URL, ADMIN_API_KEY (at least 32 random characters),
+# and CORS_ORIGINS for the exact frontend origins.
 set -a && source .env && set +a
-psql "${DATABASE_URL/+psycopg/}" -f schema.sql
-# Optional demo account so the frontend has an existing user to open:
-psql "${DATABASE_URL/+psycopg/}" -c "INSERT INTO users (email, name) VALUES ('demo@example.com', 'Demo User') ON CONFLICT (email) DO NOTHING;"
-psql "${DATABASE_URL/+psycopg/}" -c "SELECT user_id, email, name FROM users WHERE email = 'demo@example.com';"
+psql "${DATABASE_URL/+psycopg/}" -v ON_ERROR_STOP=1 -f schema.sql
 uvicorn src.main:app --reload
 ```
 
-To run with the daily scheduler inside the same process, start the app from the same directory:
+Applying `schema.sql` is idempotent and upgrades existing databases by adding the password hash and revocable session table. Back up any important database before applying schema changes. Legacy users created before authentication was introduced have no password hash and cannot sign in until an administrator provisions credentials through a trusted, out-of-band process.
+
+To run the daily scheduler in the same process:
+
 ```bash
 uvicorn src.app_with_scheduler:app --reload
 ```
 
-Alternatively, schedule the daily job externally via cron. Configure the needed database connection environment variables in the cron environment; shell `.env` files are not loaded automatically:
-```
-0 0 * * * curl -s http://localhost:8000/healthz >/dev/null 2>&1 && psql "$DATABASE_URL" -c "INSERT INTO credits (user_id) SELECT user_id FROM users u WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.user_id=u.user_id)"; psql "$DATABASE_URL" -c "UPDATE credits SET credits = credits + 5, last_updated = NOW();"
-```
+The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and adds 5 credits to each balance. Test scheduled changes against an isolated database before enabling a production schedule.
 
-## External Schema Update
+## Authentication and account ownership
 
-Protect with header `X-API-Key: <ADMIN_API_KEY>`
+- `POST /api/auth/register` creates a new account with a zero-credit balance. Passwords must be 12–128 characters and are stored as salted PBKDF2-HMAC-SHA256 hashes.
+- `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL.
+- `GET /api/auth/me` returns the signed-in account.
+- `POST /api/auth/logout` revokes the current session.
+- Credit endpoints require `Authorization: Bearer <token>`. The URL user ID must match the authenticated user. Requests for another account return a not-found response rather than revealing that account.
+- Sessions expire after eight hours. Password reset, email verification, and legacy-account recovery are not yet implemented; do not use this basic registration flow where verified identity is a business requirement without adding those controls.
+
+The API does not expose a public user-directory or arbitrary account-creation endpoint. Account registration only creates an account for the email address supplied; email ownership is not verified by this assignment version.
+
+## Credit endpoints
+
+- `GET /api/credits/{user_id}`
+- `POST /api/credits/{user_id}/add` body `{"amount": positiveInteger}`
+- `POST /api/credits/{user_id}/deduct` body `{"amount": positiveInteger}`
+- `PATCH /api/credits/{user_id}/reset`
+
+The backend enforces positive-integer amounts and prevents a deduction from making a balance negative. An authenticated user can only access or mutate their own account.
+
+## Schema administration
+
+Use `X-API-Key: <ADMIN_API_KEY>` for:
 
 - `GET /api/schema/migrations`
-- `POST /api/schema/apply` body:
-```json
-{ "migration_name": "add_index_on_credits", "sql": "CREATE INDEX IF NOT EXISTS idx_credits_updated ON credits(last_updated DESC);" }
-```
+- `POST /api/schema/apply` with `{"migration_name":"add_index_on_credits","sql":"CREATE INDEX IF NOT EXISTS idx_credits_updated ON credits(last_updated DESC);" }`
 
-The schema-apply endpoint executes SQL using the database role configured by `DATABASE_URL`. Keep it restricted to trusted administrators and do not expose the admin key in frontend build-time environment variables.
+Set `ADMIN_API_KEY` to a high-entropy secret of at least 32 characters. The migration endpoint accepts only one non-destructive `CREATE/ALTER TABLE`, `INDEX`, or `SEQUENCE` statement; it rejects data-manipulation statements, destructive drop/truncate statements, SQL comments, and multiple statements. This is intentionally narrower than a general SQL console. The endpoint still has elevated schema privileges: keep the key out of source control and browser build variables, use a least-privileged database role, restrict network access, and review SQL before applying it.
 
 ## Frontend connection and CORS
 
-The companion frontend uses Vite and defaults to `http://localhost:8000` for the API. Set `VITE_API_BASE_URL` in the frontend environment when the API is hosted elsewhere.
-
-The API allows the local Vite origins by default. For a deployed frontend, set `CORS_ORIGINS` to a comma-separated list of exact origins, for example:
+The companion frontend defaults to `http://localhost:8000` for local development. Set `VITE_API_BASE_URL` to the actual deployed API origin in the frontend host's environment and set `CORS_ORIGINS` to exact allowed frontend origins, such as:
 
 ```env
 CORS_ORIGINS=http://localhost:5173,https://your-frontend.example.com
 ```
 
-Restart the API after changing environment variables. The admin endpoints fail closed if `ADMIN_API_KEY` is missing; configure a strong key on the backend before using migration management.
+The `Authorization` header is explicitly allowed by CORS for bearer authentication. Never put `ADMIN_API_KEY`, database credentials, or other secrets in a `VITE_` variable; frontend build variables are visible to the browser.
