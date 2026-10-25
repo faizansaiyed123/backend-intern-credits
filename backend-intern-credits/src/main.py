@@ -464,21 +464,22 @@ def apply_schema(payload: SchemaApply, _: bool = Depends(admin_guard)):
     if not migration_name:
         raise HTTPException(status_code=422, detail="Migration name is required")
     with engine.begin() as connection:
-        exists = connection.execute(
-            text("SELECT 1 FROM schema_migrations WHERE migration_name=:n"),
-            {"n": migration_name},
+        # Claim the unique migration name first. The unique constraint serializes
+        # concurrent submissions; the record and DDL are committed or rolled back together.
+        claimed = connection.execute(
+            text(
+                "INSERT INTO schema_migrations (migration_name, sql_text) "
+                "VALUES (:n, :s) ON CONFLICT (migration_name) DO NOTHING RETURNING id"
+            ),
+            {"n": migration_name, "s": statement},
         ).first()
-        if exists:
+        if not claimed:
             return {
                 "status": "skipped",
                 "reason": "already_applied",
                 "migration_name": migration_name,
             }
         connection.execute(text(statement))
-        connection.execute(
-            text("INSERT INTO schema_migrations (migration_name, sql_text) VALUES (:n, :s)"),
-            {"n": migration_name, "s": statement},
-        )
     return {"status": "applied", "migration_name": migration_name}
 
 
