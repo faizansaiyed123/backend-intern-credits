@@ -27,7 +27,7 @@ To run the daily scheduler in the same process:
 uvicorn src.app_with_scheduler:app --reload
 ```
 
-The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and adds 5 credits to each balance. Test scheduled changes against an isolated database before enabling a production schedule.
+The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and adds 5 credits to each balance. A `credit_daily_runs` ledger and a unique UTC date key make this operation idempotent when a job retries or multiple worker processes attempt the same daily run. Test scheduled changes against an isolated database before enabling a production schedule.
 
 ## Authentication and account ownership
 
