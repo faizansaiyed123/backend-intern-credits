@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at ON schema_migrations(applied_at DESC);
 
 
--- Track failed sign-in attempts by a one-way email fingerprint, not by storing raw email again.
+-- Track failed sign-in attempts by a one-way email-and-client fingerprint, not raw identifiers.
 CREATE TABLE IF NOT EXISTS auth_login_attempts (
     email_hash CHAR(64) PRIMARY KEY,
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
@@ -61,3 +61,5 @@ CREATE TABLE IF NOT EXISTS auth_login_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_blocked_until
     ON auth_login_attempts(blocked_until);
+CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_window_started_at
+    ON auth_login_attempts(window_started_at);
