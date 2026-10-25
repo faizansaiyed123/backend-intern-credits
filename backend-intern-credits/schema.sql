@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS credits (
     last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Daily credits are applied once per UTC date, even if multiple scheduler workers run.
+CREATE TABLE IF NOT EXISTS credit_daily_runs (
+    run_date DATE PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Track schema updates applied via external API
 CREATE TABLE IF NOT EXISTS schema_migrations (
     id SERIAL PRIMARY KEY,
