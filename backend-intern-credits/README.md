@@ -32,7 +32,7 @@ The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and ad
 ## Authentication and account ownership
 
 - `POST /api/auth/register` creates a new account with a zero-credit balance. Passwords must be 12–128 characters and are stored as salted PBKDF2-HMAC-SHA256 hashes.
-- `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL. Failed attempts are counted per one-way email fingerprint; after 10 failed attempts within a 15-minute window, sign-in is blocked for 15 minutes and returns HTTP 429 with `Retry-After: 900`.
+- `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL. Failed attempts are counted using a one-way fingerprint of the normalized email and direct client address, without storing either value in the attempt table. After 10 failed attempts for that pair within a 15-minute window, sign-in is blocked for 15 minutes and returns HTTP 429 with `Retry-After: 900`.
 - `GET /api/auth/me` returns the signed-in account.
 - `POST /api/auth/logout` revokes the current session.
 - Failed sign-in attempts are throttled for 15 minutes after 10 failures per email/client fingerprint. Only a one-way hash is stored; the daily maintenance run expires old throttle records.
