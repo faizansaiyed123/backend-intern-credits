@@ -36,7 +36,8 @@ The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and ad
 - `GET /api/auth/me` returns the signed-in account.
 - `POST /api/auth/logout` revokes the current session.
 - Balance reads require `Authorization: Bearer <token>`. A normal account can read only its own balance; a trusted operator may read another account when the request also includes the valid `X-API-Key`.
-- All add, deduct, and reset operations require both a valid bearer session and the strong administrator key in `X-API-Key`. A signed-in user cannot mint credits into their own account without operator authorization. Ordinary requests for another account return a not-found response rather than revealing that account.
+- All add, deduct, and reset operations require a valid bearer session and the separate `CREDIT_ADMIN_API_KEY` in `X-API-Key`. A signed-in user cannot mint credits into their own account without operator authorization. A credit operator may access another account with the same credit key; ordinary requests return a not-found response rather than revealing that account.
+- Schema migration endpoints use a distinct `ADMIN_API_KEY`. Keep the schema-admin secret separate from the credit-operator secret and grant the schema credential to fewer people.
 - Sessions expire after eight hours. Password reset, email verification, and legacy-account recovery are not yet implemented; do not use this basic registration flow where verified identity is a business requirement without adding those controls.
 
 The API does not expose a public user-directory or arbitrary account-creation endpoint. Account registration only creates an account for the email address supplied; email ownership is not verified by this assignment version.
@@ -57,7 +58,7 @@ Use `X-API-Key: <ADMIN_API_KEY>` for:
 - `GET /api/schema/migrations`
 - `POST /api/schema/apply` with `{"migration_name":"add_index_on_credits","sql":"CREATE INDEX IF NOT EXISTS idx_credits_updated ON credits(last_updated DESC);" }`
 
-Set `ADMIN_API_KEY` to a high-entropy secret of at least 32 characters. The migration endpoint accepts only one non-destructive `CREATE/ALTER TABLE`, `INDEX`, or `SEQUENCE` statement; it rejects data-manipulation statements, destructive drop/truncate statements, SQL comments, and multiple statements. This is intentionally narrower than a general SQL console. The key is also required for credit mutations, so treat it as a privileged operator credential. Keep it out of source control and browser build variables; the frontend accepts it at runtime and holds it only in component memory. Use a least-privileged database role, restrict network access, and review SQL before applying it.
+Set both `ADMIN_API_KEY` and `CREDIT_ADMIN_API_KEY` to different high-entropy secrets of at least 32 characters each. The migration endpoint accepts only one non-destructive `CREATE/ALTER TABLE`, `INDEX`, or `SEQUENCE` statement; it rejects data-manipulation statements, destructive drop/truncate statements, SQL comments, and multiple statements. This is intentionally narrower than a general SQL console. The separate credit-operator key is required for balance mutations. Treat both keys as privileged credentials. Keep it out of source control and browser build variables; the frontend accepts it at runtime and holds it only in component memory. Use a least-privileged database role, restrict network access, and review SQL before applying it.
 
 ## Frontend connection and CORS
 
