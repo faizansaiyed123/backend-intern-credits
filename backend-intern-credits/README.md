@@ -12,14 +12,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r src/requirements.txt
 cp .env.example .env
-# Configure DATABASE_URL, ADMIN_API_KEY (at least 32 random characters),
-# and CORS_ORIGINS for the exact frontend origins.
+# Configure DATABASE_URL and two different strong keys (32+ random characters):
+# ADMIN_API_KEY and CREDIT_ADMIN_API_KEY; also set exact frontend CORS_ORIGINS.
 set -a && source .env && set +a
 psql "${DATABASE_URL/+psycopg/}" -v ON_ERROR_STOP=1 -f schema.sql
 uvicorn src.main:app --reload
 ```
 
-Applying `schema.sql` is idempotent and upgrades existing databases by adding the password hash and revocable session table. Back up any important database before applying schema changes. Legacy users created before authentication was introduced have no password hash and cannot sign in until an administrator provisions credentials through a trusted, out-of-band process.
+Applying `schema.sql` is idempotent and upgrades existing databases with the password hash, revocable sessions, and database-backed sign-in throttling table. Back up any important database before applying schema changes. Legacy users created before authentication was introduced have no password hash and cannot sign in until an administrator provisions credentials through a trusted, out-of-band process.
 
 To run the daily scheduler in the same process:
 
@@ -32,7 +32,7 @@ The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and ad
 ## Authentication and account ownership
 
 - `POST /api/auth/register` creates a new account with a zero-credit balance. Passwords must be 12–128 characters and are stored as salted PBKDF2-HMAC-SHA256 hashes.
-- `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL.
+- `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL. Failed attempts are counted per one-way email fingerprint; after 10 failed attempts within a 15-minute window, sign-in is blocked for 15 minutes and returns HTTP 429 with `Retry-After: 900`.
 - `GET /api/auth/me` returns the signed-in account.
 - `POST /api/auth/logout` revokes the current session.
 - Balance reads require `Authorization: Bearer <token>`. A normal account can read only its own balance; a trusted operator may read another account when the request also includes the valid `X-API-Key`.
@@ -49,7 +49,7 @@ The API does not expose a public user-directory or arbitrary account-creation en
 - `POST /api/credits/{user_id}/deduct` body `{"amount": positiveInteger}`
 - `PATCH /api/credits/{user_id}/reset`
 
-The backend enforces positive-integer amounts and prevents a deduction from making a balance negative. An authenticated user can only access or mutate their own account.
+The backend enforces positive-integer amounts and prevents a deduction from making a balance negative. A normal signed-in user can only read their own balance. Credit mutations require the separate operator key, and an operator can act on another account only when both valid credentials are supplied.
 
 ## Schema administration
 
@@ -68,4 +68,4 @@ The companion frontend defaults to `http://localhost:8000` for local development
 CORS_ORIGINS=http://localhost:5173,https://your-frontend.example.com
 ```
 
-The `Authorization` header is explicitly allowed by CORS for bearer authentication. Never put `ADMIN_API_KEY`, database credentials, or other secrets in a `VITE_` variable; frontend build variables are visible to the browser.
+The `Authorization` and `X-API-Key` headers are explicitly allowed by CORS for bearer authentication and privileged operator actions. Never put `ADMIN_API_KEY`, database credentials, or other secrets in a `VITE_` variable; frontend build variables are visible to the browser.
