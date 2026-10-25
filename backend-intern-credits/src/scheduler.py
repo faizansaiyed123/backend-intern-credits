@@ -1,22 +1,44 @@
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timezone
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import text
+
 try:
-    from .db import run_sql
+    from .db import engine
 except ImportError:
-    from db import run_sql
+    from db import engine
 
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
-def add_daily_credits():
-    run_sql(
-        "INSERT INTO credits (user_id) SELECT user_id FROM users u "
-        "WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.user_id=u.user_id)"
-    )
-    run_sql("UPDATE credits SET credits = credits + 5, last_updated = NOW()")
-    print(f"[{datetime.now(timezone.utc)}] Daily credits added.")
+def add_daily_credits() -> bool:
+    run_date = datetime.now(timezone.utc).date()
+    with engine.begin() as connection:
+        claimed = connection.execute(
+            text(
+                "INSERT INTO credit_daily_runs (run_date) VALUES (:run_date) "
+                "ON CONFLICT (run_date) DO NOTHING RETURNING run_date"
+            ),
+            {"run_date": run_date},
+        ).first()
+        if not claimed:
+            print(f"[{datetime.now(timezone.utc)}] Daily credit refresh already applied for {run_date}.")
+            return False
+
+        connection.execute(
+            text(
+                "INSERT INTO credits (user_id) "
+                "SELECT user_id FROM users "
+                "ON CONFLICT (user_id) DO NOTHING"
+            )
+        )
+        connection.execute(
+            text("UPDATE credits SET credits = credits + 5, last_updated = NOW()")
+        )
+
+    print(f"[{datetime.now(timezone.utc)}] Daily credits added for {run_date}.")
+    return True
 
 
 def start_scheduler():
