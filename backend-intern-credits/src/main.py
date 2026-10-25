@@ -40,16 +40,20 @@ app.add_middleware(
 PASSWORD_ITERATIONS = 310_000
 SESSION_LIFETIME = timedelta(hours=8)
 EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s.]+(?:\.[^@\s.]+)+$")
-SAFE_MIGRATION_START = re.compile(
-    r"^\s*(?:CREATE\s+(?:UNIQUE\s+)?INDEX\b|CREATE\s+TABLE\b|"
-    r"ALTER\s+TABLE\b|CREATE\s+SEQUENCE\b|ALTER\s+SEQUENCE\b)",
+SAFE_INDEX_STATEMENT = re.compile(
+    r"^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"[A-Za-z_][A-Za-z0-9_$]*\s+ON\s+"
+    r"(?P<table>[A-Za-z_][A-Za-z0-9_$]*)\s*"
+    r"\(\s*(?P<columns>[A-Za-z_][A-Za-z0-9_$]*(?:\s+(?:ASC|DESC))?"
+    r"(?:\s*,\s*[A-Za-z_][A-Za-z0-9_$]*(?:\s+(?:ASC|DESC))?)*)\s*\)$",
     re.IGNORECASE,
 )
-FORBIDDEN_MIGRATION_KEYWORDS = re.compile(
-    r"\b(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT|UPSERT|MERGE|COPY|CALL|DO|"
-    r"GRANT|REVOKE|EXECUTE|VACUUM|ANALYZE|SECURITY|OWNER|RESET|COMMIT|ROLLBACK)\b",
-    re.IGNORECASE,
-)
+ALLOWED_INDEX_COLUMNS = {
+    "users": {"user_id", "email", "created_at"},
+    "credits": {"user_id", "last_updated"},
+    "schema_migrations": {"id", "migration_name", "applied_at"},
+    "auth_sessions": {"session_id", "user_id", "token_hash", "expires_at", "revoked_at"},
+}
 
 
 class RegisterInput(BaseModel):
@@ -359,18 +363,28 @@ def validate_migration_sql(sql_text: str) -> str:
     statement = sql_text.strip()
     if not statement:
         raise HTTPException(status_code=422, detail="SQL statement is required")
-    # Keep this endpoint to a single, non-destructive schema statement. This prevents
-    # using the migration UI as an arbitrary SQL console, even with a valid admin key.
+    if len(statement) > 10_000:
+        raise HTTPException(status_code=422, detail="SQL statement is too long")
+    # Do not expose a general-purpose SQL console. Accept only plain index creation
+    # on known application tables and explicitly approved columns.
     if ";" in statement[:-1] or "--" in statement or "/*" in statement or "*/" in statement:
-        raise HTTPException(status_code=400, detail="Use one schema statement without inline SQL comments")
+        raise HTTPException(status_code=400, detail="Use one index statement without inline SQL comments")
     statement = statement[:-1].rstrip() if statement.endswith(";") else statement
-    if not SAFE_MIGRATION_START.match(statement) or FORBIDDEN_MIGRATION_KEYWORDS.search(statement):
+    match = SAFE_INDEX_STATEMENT.fullmatch(statement)
+    if not match:
         raise HTTPException(
             status_code=400,
-            detail="Only non-destructive CREATE/ALTER TABLE, INDEX, or SEQUENCE statements are allowed",
+            detail="Only CREATE INDEX statements on approved application columns are allowed",
         )
+    table = match.group("table").lower()
+    if table not in ALLOWED_INDEX_COLUMNS:
+        raise HTTPException(status_code=400, detail="Index target table is not allowed")
+    columns = re.split(r"\s*,\s*", match.group("columns"))
+    for column_spec in columns:
+        column_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_$]*)(?:\s+(?:ASC|DESC))?", column_spec.strip(), re.IGNORECASE)
+        if not column_match or column_match.group(1).lower() not in ALLOWED_INDEX_COLUMNS[table]:
+            raise HTTPException(status_code=400, detail="Index target column is not allowed")
     return statement
-
 
 @app.get("/api/schema/migrations")
 def list_migrations(_: bool = Depends(admin_guard)):
