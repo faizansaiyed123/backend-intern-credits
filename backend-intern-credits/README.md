@@ -35,6 +35,7 @@ The scheduler runs at 00:00 UTC, ensures existing users have credit rows, and ad
 - `POST /api/auth/login` returns an opaque bearer token. Only its SHA-256 hash is stored in PostgreSQL. Failed attempts are counted per one-way email fingerprint; after 10 failed attempts within a 15-minute window, sign-in is blocked for 15 minutes and returns HTTP 429 with `Retry-After: 900`.
 - `GET /api/auth/me` returns the signed-in account.
 - `POST /api/auth/logout` revokes the current session.
+- Failed sign-in attempts are throttled for 15 minutes after 10 failures per email/client fingerprint. Only a one-way hash is stored; the daily maintenance run expires old throttle records.
 - Balance reads require `Authorization: Bearer <token>`. A normal account can read only its own balance; a trusted operator may read another account when the request also includes the valid `X-API-Key`.
 - All add, deduct, and reset operations require a valid bearer session and the separate `CREDIT_ADMIN_API_KEY` in `X-API-Key`. A signed-in user cannot mint credits into their own account without operator authorization. A credit operator may access another account with the same credit key; ordinary requests return a not-found response rather than revealing that account.
 - Schema migration endpoints use a distinct `ADMIN_API_KEY`. Keep the schema-admin secret separate from the credit-operator secret and grant the schema credential to fewer people.
